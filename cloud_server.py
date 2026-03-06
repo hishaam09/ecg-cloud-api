@@ -1,43 +1,35 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
 import numpy as np
-import tensorflow as tf
+import tflite_runtime.interpreter as tflite
 
 app = FastAPI()
 
-# Load cloud model
-model = tf.keras.models.load_model("ecg_cloud_model.h5")
+interpreter = tflite.Interpreter(model_path="ecg_cloud_model.tflite")
+interpreter.allocate_tensors()
 
-classes = [
-    "Normal ECG",
-    "Atrial Fibrillation",
-    "Arrhythmia"
-]
-
-# Request format
-class ECGInput(BaseModel):
-    ecg_signal: list
-
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
 @app.post("/predict")
-def predict(data: ECGInput):
+def predict(data: dict):
 
-    ecg = np.array(data.ecg_signal)
+    ecg = np.array(data["ecg_signal"])
 
-    # pad or trim
     if len(ecg) < 200:
-        ecg = np.pad(ecg, (0, 200 - len(ecg)))
+        ecg = np.pad(ecg,(0,200-len(ecg)))
 
     ecg = ecg[:200]
 
-    ecg = ecg.reshape(1, 200, 1)
+    ecg = ecg.reshape(1,200,1).astype(np.float32)
 
-    prediction = model.predict(ecg)
+    interpreter.set_tensor(input_details[0]['index'], ecg)
+    interpreter.invoke()
 
-    result = classes[np.argmax(prediction)]
-    confidence = float(np.max(prediction))
+    prediction = interpreter.get_tensor(output_details[0]['index'])
+
+    result = "Normal ECG" if prediction[0][0] < 0.5 else "Abnormal ECG"
 
     return {
         "diagnosis": result,
-        "confidence": confidence
+        "confidence": float(prediction[0][0])
     }
