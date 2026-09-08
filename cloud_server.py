@@ -1,14 +1,16 @@
 from fastapi import FastAPI
 import numpy as np
-import tflite_runtime.interpreter as tflite
+import tensorflow as tf
 
 app = FastAPI()
 
-interpreter = tflite.Interpreter(model_path="ecg_cloud_model.tflite")
-interpreter.allocate_tensors()
+model = tf.keras.models.load_model("ecg_cloud_model.h5")
 
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+classes = [
+    "Normal ECG",
+    "Atrial Fibrillation",
+    "Arrhythmia"
+]
 
 @app.post("/predict")
 def predict(data: dict):
@@ -20,16 +22,14 @@ def predict(data: dict):
 
     ecg = ecg[:200]
 
-    ecg = ecg.reshape(1,200,1).astype(np.float32)
+    ecg = ecg.reshape(1,200,1)
 
-    interpreter.set_tensor(input_details[0]['index'], ecg)
-    interpreter.invoke()
+    prediction = model.predict(ecg)
 
-    prediction = interpreter.get_tensor(output_details[0]['index'])
-
-    result = "Normal ECG" if prediction[0][0] < 0.5 else "Abnormal ECG"
+    result = classes[np.argmax(prediction)]
+    confidence = float(np.max(prediction))
 
     return {
         "diagnosis": result,
-        "confidence": float(prediction[0][0])
+        "confidence": confidence
     }
